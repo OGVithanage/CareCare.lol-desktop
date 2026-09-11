@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+    >
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>CareCare.lol</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="renderer.js" defer></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <a class="brand" href="#" aria-label="CareCare.lol home">
+          <span class="brand-mark" aria-hidden="true">C</span>
+          <span>CareCare<span>.lol</span></span>
+        </a>
+
+        <nav aria-label="Primary navigation">
+          <a class="nav-item active" href="#overview" aria-current="page">Overview</a>
+          <a class="nav-item" href="#family">Family</a>
+          <a class="nav-item" href="#devices">Devices</a>
+          <a class="nav-item" href="#rules">Rules &amp; schedules</a>
+          <a class="nav-item" href="#activity">Activity</a>
+        </nav>
+
+        <div class="sidebar-footer">
+          <span class="status-dot" aria-hidden="true"></span>
+          <div><strong>Protected locally</strong><small data-electron-version>Electron</small></div>
+        </div>
+      </aside>
+
+      <main id="overview">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Friday, September 11</p>
+            <h1>Good morning</h1>
+          </div>
+          <button class="profile" type="button" aria-label="Open profile">OS</button>
+        </header>
+
+        <section class="hero" aria-labelledby="hero-title">
+          <div>
+            <span class="pill">All systems healthy</span>
+            <h2 id="hero-title">Your family is protected.</h2>
+            <p>CareCare helps build safer digital habits with thoughtful limits, clear insights, and room for trust.</p>
+          </div>
+          <div class="shield" aria-hidden="true">✓</div>
+        </section>
+
+        <section aria-labelledby="today-title">
+          <div class="section-heading">
+            <div><p class="eyebrow">At a glance</p><h2 id="today-title">Today</h2></div>
+            <button class="text-button" type="button">View activity</button>
+          </div>
+          <div class="metrics">
+            <article class="card metric"><span class="metric-icon mint">◷</span><div><strong>2h 18m</strong><p>Screen time</p></div><small>12% less than yesterday</small></article>
+            <article class="card metric"><span class="metric-icon peach">◇</span><div><strong>3</strong><p>Devices online</p></div><small>Everything looks good</small></article>
+            <article class="card metric"><span class="metric-icon lavender">✓</span><div><strong>7</strong><p>Rules active</p></div><small>Next bedtime at 8:30 PM</small></article>
+          </div>
+        </section>
+
+        <section class="family-section" id="family" aria-labelledby="family-title">
+          <div class="section-heading">
+            <div><p class="eyebrow">Family</p><h2 id="family-title">Everyone at a glance</h2></div>
+            <button class="primary-button" type="button">Add family member</button>
+          </div>
+          <div class="family-grid">
+            <article class="card person"><div class="avatar coral">M</div><div><h3>Maya</h3><p>1h 24m today</p></div><span class="online">Online</span></article>
+            <article class="card person"><div class="avatar blue">L</div><div><h3>Leo</h3><p>54m today</p></div><span class="offline">Offline</span></article>
+            <article class="card setup"><span>＋</span><div><h3>Connect a device</h3><p>Protect a phone, tablet, or computer.</p></div></article>
+          </div>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>
