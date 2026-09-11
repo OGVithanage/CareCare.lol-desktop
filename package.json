@@ -3,10 +3,11 @@
   "productName": "CareCare.lol",
   "version": "0.1.0",
   "description": "A secure desktop foundation for the CareCare.lol parental control system.",
+  "type": "module",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
-    "check": "node --check src/main.js && node --check src/preload.js && node --check src/renderer.js"
+    "check": "node --check src/main.js && node --check src/preload.cjs && node --check src/renderer.js"
   },
   "keywords": [
     "electron",
@@ -15,6 +16,9 @@
   "author": "CareCare.lol",
   "license": "UNLICENSED",
   "private": true,
+  "dependencies": {
+    "electron-store": "11.0.2"
+  },
   "devDependencies": {
     "electron": "44.3.0"
   }

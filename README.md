@@ -1,6 +1,6 @@
 # CareCare.lol Desktop
 
-A secure Electron starter for the CareCare.lol parental control system.
+A secure Electron app for managing the CareCare.lol website allowlist.
 
 ## Requirements
 
@@ -23,10 +23,12 @@ npm run check
 ## Structure
 
 - `src/main.js` — Electron main process and window lifecycle
-- `src/preload.js` — narrow, context-isolated renderer bridge
+- `src/preload.cjs` — narrow, context-isolated renderer bridge
 - `src/renderer.js` — browser-only interface behavior
 - `src/index.html` and `src/styles.css` — starter dashboard
 
 ## Security baseline
 
-The renderer uses context isolation and Chromium sandboxing, without Node.js integration. The app denies permission requests, unexpected navigation, and new windows, and its local page has a restrictive Content Security Policy. Keep Electron current and expose only narrowly scoped, validated IPC methods when adding privileged features.
+The renderer uses context isolation and Chromium sandboxing, without Node.js integration. The app denies permission requests, unexpected navigation, and new windows, and its local page has a restrictive Content Security Policy. IPC senders and stored values are validated in the main process.
+
+The website allowlist is stored atomically by `electron-store` in Electron's per-user application data directory. Only normalized HTTP and HTTPS origins are saved.
