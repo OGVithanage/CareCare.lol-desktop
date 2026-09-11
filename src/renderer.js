@@ -1,3 +1,5 @@
+import { normalizeWebsite } from './website.js'
+
 const form = document.querySelector('#website-form')
 const input = document.querySelector('#website-input')
 const list = document.querySelector('#website-list')
@@ -7,12 +9,30 @@ const saveButton = document.querySelector('#save-button')
 const status = document.querySelector('#save-status')
 
 let websites = []
+let busy = true
+let loaded = false
 
-const normalizeWebsite = (value) => {
-  const candidate = value.trim()
-  const url = new URL(candidate.includes('://') ? candidate : `https://${candidate}`)
-  if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error('Unsupported protocol')
-  return url.origin
+const setBusy = (value) => {
+  busy = value
+  input.disabled = value
+  form.querySelector('button').disabled = value
+  saveButton.disabled = value
+  list.querySelectorAll('button').forEach((button) => { button.disabled = value })
+}
+
+const applyChanges = async () => {
+  setBusy(true)
+  status.textContent = 'Saving and applying…'
+  try {
+    const result = await window.carecare.saveAllowedWebsites(websites)
+    websites = result.websites
+    status.textContent = result.enforcement.message
+  } catch {
+    status.textContent = 'Could not save changes. Retry.'
+  } finally {
+    renderWebsites()
+    setBusy(false)
+  }
 }
 
 const renderWebsites = () => {
@@ -29,11 +49,12 @@ const renderWebsites = () => {
     removeButton.type = 'button'
     removeButton.className = 'remove-button'
     removeButton.textContent = 'Remove'
+    removeButton.disabled = busy
     removeButton.setAttribute('aria-label', `Remove ${website}`)
     removeButton.addEventListener('click', () => {
       websites = websites.filter((entry) => entry !== website)
-      status.textContent = 'Unsaved changes'
       renderWebsites()
+      void applyChanges()
     })
 
     item.append(label, removeButton)
@@ -43,6 +64,7 @@ const renderWebsites = () => {
 
 form.addEventListener('submit', (event) => {
   event.preventDefault()
+  if (busy) return
   input.setCustomValidity('')
 
   try {
@@ -50,38 +72,30 @@ form.addEventListener('submit', (event) => {
     if (!websites.includes(website)) websites.push(website)
     websites.sort((first, second) => first.localeCompare(second))
     input.value = ''
-    status.textContent = 'Unsaved changes'
     renderWebsites()
-    input.focus()
+    void applyChanges()
   } catch {
     input.setCustomValidity('Enter a valid website, such as example.com.')
     input.reportValidity()
   }
 })
 
-saveButton.addEventListener('click', async () => {
-  saveButton.disabled = true
-  status.textContent = 'Saving…'
-
-  try {
-    websites = await window.carecare.saveAllowedWebsites(websites)
-    status.textContent = 'Saved on this computer'
-    renderWebsites()
-  } catch {
-    status.textContent = 'Could not save. Try again.'
-  } finally {
-    saveButton.disabled = false
-  }
-})
+saveButton.addEventListener('click', () => loaded ? applyChanges() : loadWebsites())
 
 const loadWebsites = async () => {
+  setBusy(true)
   try {
-    websites = await window.carecare.getAllowedWebsites()
-    status.textContent = 'Saved on this computer'
+    const result = await window.carecare.getAllowedWebsites()
+    websites = result.websites
+    loaded = true
+    status.textContent = result.enforcement.message
     renderWebsites()
+    setBusy(false)
   } catch {
-    status.textContent = 'Could not load saved websites.'
+    status.textContent = 'Could not load saved websites. Retry to load them.'
+    saveButton.disabled = false
   }
 }
 
+setBusy(true)
 loadWebsites()

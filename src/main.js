@@ -2,6 +2,8 @@ import { app, BrowserWindow, ipcMain, session } from 'electron/main'
 import Store from 'electron-store'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { applyWindowsAllowlist } from './windows-service.js'
+import { normalizeWebsite } from './website.js'
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url))
 let mainWindow
@@ -23,19 +25,6 @@ const validateSender = (event) => (
   event.sender === mainWindow.webContents &&
   event.senderFrame === event.sender.mainFrame
 )
-
-const normalizeWebsite = (value) => {
-  if (typeof value !== 'string' || value.length > 2048) throw new Error('Invalid website')
-  const candidate = value.trim()
-  if (!candidate) throw new Error('Website cannot be empty')
-
-  const url = new URL(candidate.includes('://') ? candidate : `https://${candidate}`)
-  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
-    throw new Error('Only HTTP and HTTPS websites are supported')
-  }
-
-  return url.origin
-}
 
 const createWindow = () => {
   mainWindow = new BrowserWindow({
@@ -62,12 +51,22 @@ const createWindow = () => {
   })
 }
 
+let saveQueue = Promise.resolve()
+const saveAndApply = (websites) => {
+  const operation = saveQueue.then(async () => {
+    store.set('allowedWebsites', websites)
+    return { websites, enforcement: await applyWindowsAllowlist(websites) }
+  })
+  saveQueue = operation.catch(() => {})
+  return operation
+}
+
 app.whenReady().then(() => {
   session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false))
 
   ipcMain.handle('allowlist:get', (event) => {
     if (!validateSender(event)) throw new Error('Unauthorized IPC sender')
-    return store.get('allowedWebsites')
+    return saveAndApply(store.get('allowedWebsites'))
   })
 
   ipcMain.handle('allowlist:save', (event, websites) => {
@@ -75,8 +74,7 @@ app.whenReady().then(() => {
     if (!Array.isArray(websites) || websites.length > 500) throw new Error('Invalid website list')
 
     const normalizedWebsites = [...new Set(websites.map(normalizeWebsite))]
-    store.set('allowedWebsites', normalizedWebsites)
-    return normalizedWebsites
+    return saveAndApply(normalizedWebsites)
   })
 
   createWindow()

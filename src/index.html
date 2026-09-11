@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Allowed websites · CareCare.lol</title>
     <link rel="stylesheet" href="styles.css">
-    <script src="renderer.js" defer></script>
+    <script src="renderer.js" type="module"></script>
   </head>
   <body>
     <main>
@@ -19,7 +19,7 @@
             <input id="website-input" type="text" inputmode="url" autocomplete="url" placeholder="example.com" maxlength="2048" required>
             <button class="add-button" type="submit">Add website</button>
           </div>
-          <p class="hint">Use a domain or full website address.</p>
+          <p class="hint">Use a domain or full website address. Changes save and apply automatically. Windows filtering applies to all apps; subdomains must be added separately.</p>
         </form>
 
         <div class="list-heading">
@@ -33,7 +33,7 @@
 
         <footer>
           <span id="save-status" role="status">Loading…</span>
-          <button id="save-button" class="save-button" type="button">Save allowed websites</button>
+          <button id="save-button" class="save-button" type="button">Retry applying list</button>
         </footer>
       </section>
     </main>
