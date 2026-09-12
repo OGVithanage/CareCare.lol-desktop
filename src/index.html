@@ -19,7 +19,17 @@
             <input id="website-input" type="text" inputmode="url" autocomplete="url" placeholder="example.com" maxlength="2048" required>
             <button class="add-button" type="submit">Add website</button>
           </div>
-          <p class="hint">Use a domain or full website address. Changes save and apply automatically. Windows filtering applies to all apps; subdomains must be added separately.</p>
+          <div class="subdomain-option">
+            <div class="subdomain-copy">
+              <label for="allow-subdomains">Allow subdomains <span class="coming-soon">Not active yet</span></label>
+              <p>Also allow addresses such as www.example.com and video.example.com.</p>
+            </div>
+            <label class="switch" aria-label="Allow subdomains">
+              <input id="allow-subdomains" type="checkbox">
+              <span class="switch-track" aria-hidden="true"></span>
+            </label>
+          </div>
+          <p class="hint">Use a domain or full website address. Changes save and apply automatically. Windows filtering applies to all apps.</p>
         </form>
 
         <div class="list-heading">
