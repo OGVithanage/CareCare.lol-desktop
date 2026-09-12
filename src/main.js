@@ -88,9 +88,9 @@ app.whenReady().then(() => {
     return saveAndApply()
   })
 
-  ipcMain.handle('allowlist:save', (event, websites) => {
+  ipcMain.handle('allowlist:save', (event, allowlist) => {
     if (!validateSender(event)) throw new Error('Unauthorized IPC sender')
-    return saveAndApply(websites)
+    return saveAndApply(allowlist)
   })
 
   createWindow()

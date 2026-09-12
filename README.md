@@ -31,11 +31,11 @@ npm run check
 
 The renderer uses context isolation and Chromium sandboxing, without Node.js integration. The app denies permission requests, unexpected navigation, and new windows, and its local page has a restrictive Content Security Policy. IPC senders and stored values are validated in the main process.
 
-The website allowlist is stored atomically by `electron-store` in Electron's per-user application data directory. Versioned domain rules store normalized hostnames and an `allowSubdomains` boolean; legacy origin lists migrate automatically. The existing UI remains unchanged and does not yet edit that setting.
+The website allowlist is stored atomically by `electron-store` in Electron's per-user application data directory. Versioned domain rules store normalized hostnames and an `allowSubdomains` boolean; legacy origin lists migrate automatically. The add-form switch and each saved row’s hierarchy button edit additional-subdomain access. The main domain and its conventional `www` alias remain allowed in either state. Windows UI and enforcement acceptance for this integration is still pending.
 
 ## Windows filtering
 
-Add/remove operations save automatically and synchronize the complete list with a local Windows service. The UI distinguishes local saves from confirmed policy updates. Install the service separately using the [Windows build, installation, recovery, and acceptance-test guide](windows/README.md).
+Add, remove, and subdomain-toggle operations save automatically and synchronize the complete list with a local Windows service. The UI distinguishes local saves from confirmed policy updates. Install the service separately using the [Windows build, installation, recovery, and acceptance-test guide](windows/README.md).
 
 The version 2 service combines an HTTP/HTTPS hostname proxy with machine-wide IPv4/IPv6 WFP restrictions. It persists rules across restarts and revokes connections when their destination loses permission. Chrome/Edge are the initial managed browser targets. Windows acceptance testing remains required; encrypted CONNECT tunnels are not inspected internally. macOS/Linux retain local list management only. See the Windows guide for supported protocols and limitations.
 

@@ -2,7 +2,7 @@
 
 Date: 2026-09-12
 
-Status: Proposed UI integration for the implemented version 2 allowlist and Windows hostname enforcement.
+Status: UI integration implemented on `feature/per-website-subdomain-policy`. JavaScript syntax checks and all 25 automated tests pass. .NET tests, Windows browser-policy tests, and manual Windows UI/accessibility acceptance remain pending; the implementation host is macOS without a .NET SDK.
 
 ## Goal
 

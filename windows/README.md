@@ -23,7 +23,7 @@ Electron stores `{ "allowlist": { "version": 2, "websites": [{ "domain": "exampl
 
 The new pipe is `\\.\pipe\CareCare.Allowlist.v2`. Requests and responses require version 2. Version 1 requests are rejected, and the client never retries with strings. Upgrade the client and service together; an old client cannot contact the new endpoint. The installer requires the version 2 package manifest. SYSTEM, administrators and the configured controller SID can update policy; remote pipe logons are denied. Any process under the controller account has its permissions.
 
-The renderer, HTML and CSS are unchanged. Its existing string API is adapted in the main process: retained domains keep their saved setting; new domains default to false. The main-process IPC also accepts the versioned payload and returns it as `allowlist`, alongside the existing `websites` response. **The existing checkbox remains unwired; per-website editing requires a separate UI change.** Locally persisted changes and service-confirmed enforcement remain distinct.
+The renderer now reads and saves complete version 2 policies using `allowlist`. The add-form checkbox sets additional-subdomain access; each saved row has an accessible hierarchy button to change it. The main domain and `www` alias remain allowed in either state. Legacy string IPC compatibility remains for older callers. Locally persisted changes and service-confirmed enforcement remain distinct. **Windows UI and enforcement acceptance is pending:** run the sequence in [the UI integration plan](../reports/subdomain-toggle-ui-backend-plan.md) before release.
 
 ## Enforcement and live updates
 

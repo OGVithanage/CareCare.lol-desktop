@@ -34,7 +34,7 @@ export const loadAllowlist = (store) => {
   return migrated
 }
 
-// Compatibility for the unchanged renderer. Preserve settings for retained rows;
+// Compatibility for older renderer bundles. Preserve settings for retained rows;
 // only genuinely new domains receive the migration default of false.
 export const fromLegacyEditor = (websites, current) => {
   const normalized = migrateLegacy(websites)
