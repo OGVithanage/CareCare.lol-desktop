@@ -78,16 +78,22 @@ async Task<TcpClient> Request(string text)
     await client.GetStream().WriteAsync(Encoding.ASCII.GetBytes(text), token);
     return client;
 }
-async Task<string> Header(TcpClient client)
+async Task<string> Header(TcpClient client, bool resetIsValid = false)
 {
     var bytes = new List<byte>();
     var one = new byte[1];
-    while (bytes.Count < 32768)
+    try
     {
-        if (await client.GetStream().ReadAsync(one, token) == 0) break;
-        bytes.Add(one[0]);
-        if (Encoding.ASCII.GetString(bytes.ToArray()).EndsWith("\r\n\r\n")) break;
+        while (bytes.Count < 32768)
+        {
+            if (await client.GetStream().ReadAsync(one, token) == 0) break;
+            bytes.Add(one[0]);
+            if (Encoding.ASCII.GetString(bytes.ToArray()).EndsWith("\r\n\r\n")) break;
+        }
     }
+    // Windows can reset a rejected connection when unread request bytes remain.
+    // That is equivalent to an HTTP error for these deliberately malformed inputs.
+    catch (IOException) when (resetIsValid) { return "CONNECTION_RESET"; }
     return Encoding.ASCII.GetString(bytes.ToArray());
 }
 async Task Closed(TcpClient client)
@@ -114,8 +120,10 @@ try
         "GET http://example.com/ HTTP/1.1\r\nBad: " + new string('x', 32768) + "\r\n\r\n" })
     {
         using var invalid = await Request(request);
-        Check((await Header(invalid)).StartsWith("HTTP/1.1 400"), "Malformed request was accepted.");
+        var rejection = await Header(invalid, resetIsValid: true);
+        Check(rejection.StartsWith("HTTP/1.1 400") || rejection == "CONNECTION_RESET", "Malformed request was accepted.");
     }
+    Check(decisions.Count == 0, "Malformed requests reached connector.");
     using (var http = await Request("GET http://new.example.com/a?q=1 HTTP/1.1\r\nHost: new.example.com\r\n\r\nGET http://blocked.com/ HTTP/1.1\r\n\r\n"))
     using (var server = await upstreamListener.AcceptTcpClientAsync(token))
     {

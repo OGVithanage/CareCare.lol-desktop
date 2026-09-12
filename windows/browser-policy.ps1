@@ -1,4 +1,10 @@
 # Shared by install/uninstall. The ownership journal is saved before each mutation.
+function Test-CareCarePolicyValue {
+    param($Actual, $Expected, [string]$Kind)
+    if ($Kind -eq 'DWord') { return [int64]$Actual -eq [int64]$Expected }
+    return [string]::Equals([string]$Actual, [string]$Expected, [StringComparison]::Ordinal)
+}
+
 function Set-CareCareBrowserPolicy {
     param(
         [string]$State,
@@ -16,7 +22,8 @@ function Set-CareCareBrowserPolicy {
             $value = if ($present) { $key.GetValue($setting.Name) } else { $null }
             $kind = if ($present) { $key.GetValueKind($setting.Name).ToString() } else { $null }
             if ($existing.Count -gt 0) {
-                if (!$present -or $value -ne $existing[0].OwnedValue -or $kind -ne $existing[0].OwnedKind) {
+                $ownedKind = [string]$existing[0].OwnedKind
+                if (!$present -or $kind -cne $ownedKind -or !(Test-CareCarePolicyValue $value $existing[0].OwnedValue $ownedKind)) {
                     throw "Browser policy changed outside CareCare: $path\$($setting.Name). Resolve this conflict before reinstalling."
                 }
             } else {
@@ -39,7 +46,10 @@ function Restore-CareCareBrowserPolicy {
         $key = Get-Item $entry.Path -ErrorAction SilentlyContinue
         if ($null -eq $key -or $key.GetValueNames() -notcontains $entry.Name) { continue }
         # Preserve subsequent edits made by administrators or other management software.
-        if ($key.GetValue($entry.Name) -ne $entry.OwnedValue -or $key.GetValueKind($entry.Name).ToString() -ne $entry.OwnedKind) { continue }
+        $ownedKind = [string]$entry.OwnedKind
+        $currentValue = $key.GetValue($entry.Name)
+        if ($key.GetValueKind($entry.Name).ToString() -cne $ownedKind -or
+            !(Test-CareCarePolicyValue $currentValue $entry.OwnedValue $ownedKind)) { continue }
         if ($entry.Present) {
             New-ItemProperty $entry.Path -Name $entry.Name -Value $entry.Value -PropertyType $entry.Kind -Force | Out-Null
         } else { Remove-ItemProperty $entry.Path -Name $entry.Name }
