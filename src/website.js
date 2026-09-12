@@ -11,6 +11,8 @@ export const normalizeWebsite = (value) => {
       host.split('.').some((label) => !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label))) {
     throw new Error('Enter a DNS domain; IP literals and wildcards are unsupported')
   }
-  url.hostname = host
-  return url.origin
+  // Rules describe domains, not individual schemes, paths or ports.
+  // Treat one conventional www prefix as an alias without widening other hosts.
+  const domain = host.startsWith('www.') && host.slice(4).includes('.') ? host.slice(4) : host
+  return `https://${domain}`
 }
