@@ -21,7 +21,13 @@ internal static class DomainPolicy
                 !host.Contains('.') || host.Split('.').Any(label => label.Length is < 1 or > 63 ||
                     label.StartsWith('-') || label.EndsWith('-') || label.Any(c => !char.IsAsciiLetterOrDigit(c) && c != '-')))
                 throw new ArgumentException("Enter a DNS domain, such as example.com; IP literals and wildcards are unsupported.");
-            return host;
+            return host.StartsWith("www.", StringComparison.Ordinal) && host[4..].Contains('.') ? host[4..] : host;
         }).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
     }
+
+    // Expand after validating the 500 user-rule limit. Persist the unexpanded
+    // rules so a full list can still be loaded after a service restart.
+    internal static string[] Expand(string[] domains) => domains
+        .SelectMany(host => host.Length <= 249 ? new[] { host, "www." + host } : new[] { host })
+        .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
 }

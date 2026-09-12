@@ -73,7 +73,7 @@ internal sealed class AllowlistWorker(ILogger<AllowlistWorker> logger) : Backgro
         // rules survive service crashes/stops. Startup never trusts stale saved IPs.
         Apply();
         if (File.Exists(StatePath))
-            domains = DomainPolicy.Normalize(JsonSerializer.Deserialize<string[]>(await File.ReadAllTextAsync(StatePath, stoppingToken), Json));
+            domains = DomainPolicy.Expand(DomainPolicy.Normalize(JsonSerializer.Deserialize<string[]>(await File.ReadAllTextAsync(StatePath, stoppingToken), Json)));
         var config = JsonSerializer.Deserialize<ServiceConfig>(await File.ReadAllTextAsync(Path.Combine(Root, "service.json"), stoppingToken), Json)
             ?? throw new InvalidDataException("Missing service configuration.");
         var security = new PipeSecurity();
@@ -113,7 +113,7 @@ internal sealed class AllowlistWorker(ILogger<AllowlistWorker> logger) : Backgro
                             stream.Flush(true);
                         }
                         File.Move(temporary, StatePath, true);
-                        domains = updated;
+                        domains = DomainPolicy.Expand(updated);
                         await Refresh(deadline.Token);
                         var unresolved = domains.Where(domain => !cache.ContainsKey(domain)).ToArray();
                         await Reply(pipe, true, unresolved.Length == 0 ? "Saved and applied by Windows service." :

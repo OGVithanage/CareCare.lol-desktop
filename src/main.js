@@ -66,7 +66,7 @@ app.whenReady().then(() => {
 
   ipcMain.handle('allowlist:get', (event) => {
     if (!validateSender(event)) throw new Error('Unauthorized IPC sender')
-    return saveAndApply(store.get('allowedWebsites'))
+    return saveAndApply([...new Set(store.get('allowedWebsites').map(normalizeWebsite))])
   })
 
   ipcMain.handle('allowlist:save', (event, websites) => {

@@ -21,8 +21,18 @@ function connection(reply) {
 
 test('normalizes origins, Unicode and trailing-dot domains', () => {
   assert.equal(normalizeWebsite(' Example.COM/path?q=1 '), 'https://example.com')
-  assert.equal(normalizeWebsite('https://example.com.:8443/a'), 'https://example.com:8443')
+  assert.equal(normalizeWebsite('https://example.com.:8443/a'), 'https://example.com')
   assert.equal(normalizeWebsite('bücher.de'), 'https://xn--bcher-kva.de')
+})
+
+test('all main-site variants share one rule without widening other subdomains', () => {
+  for (const scheme of ['', 'http://', 'https://']) {
+    for (const host of ['google.com', 'www.google.com', 'WWW.Google.COM.']) {
+      assert.equal(normalizeWebsite(`${scheme}${host}`), 'https://google.com')
+    }
+  }
+  assert.equal(normalizeWebsite('https://mail.google.com'), 'https://mail.google.com')
+  assert.equal(normalizeWebsite('www.mail.google.com'), 'https://mail.google.com')
 })
 
 test('rejects unsupported or misleading domain input', () => {
