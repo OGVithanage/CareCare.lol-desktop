@@ -5,5 +5,5 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
-  <ItemGroup><Compile Include="../service/DomainPolicy.cs" Link="DomainPolicy.cs" /></ItemGroup>
+  <ItemGroup><Compile Include="../service/DomainPolicy.cs" Link="DomainPolicy.cs" /><Compile Include="../service/FilteringProxy.cs" Link="FilteringProxy.cs" /><Compile Include="../service/PolicyState.cs" Link="PolicyState.cs" /></ItemGroup>
 </Project>

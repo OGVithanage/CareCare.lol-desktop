@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
 import { applyWindowsAllowlist, PIPE_PATH } from '../src/windows-service.js'
+import { migrateLegacy } from '../src/allowlist.js'
 import { normalizeWebsite } from '../src/website.js'
 
 function connection(reply) {
@@ -42,17 +43,17 @@ test('rejects unsupported or misleading domain input', () => {
 })
 
 test('does not claim enforcement on other platforms', async () => {
-  const result = await applyWindowsAllowlist([], { platform: 'darwin', connect: () => assert.fail() })
+  const result = await applyWindowsAllowlist(migrateLegacy([]), { platform: 'darwin', connect: () => assert.fail() })
   assert.equal(result.applied, false)
 })
 
 test('sends full versioned list and handles fragmented replies', async () => {
   const mock = connection((socket, request) => {
-    assert.deepEqual(request, { version: 1, websites: ['https://example.com'] })
-    socket.emit('data', '{"applied":true,')
+    assert.deepEqual(request, { version: 2, websites: [{ domain: 'example.com', allowSubdomains: false }] })
+    socket.emit('data', '{"version":2,"applied":true,')
     socket.emit('data', '"message":"Applied"}\n')
   })
-  assert.deepEqual(await applyWindowsAllowlist(['https://example.com'], { platform: 'win32', connect: mock.connect }), { applied: true, message: 'Applied' })
+  assert.deepEqual(await applyWindowsAllowlist(migrateLegacy(['https://example.com']), { platform: 'win32', connect: mock.connect }), { applied: true, message: 'Applied' })
   assert.equal(mock.socket.destroyed, true)
 })
 
@@ -65,13 +66,26 @@ for (const [name, reply] of Object.entries({
 })) {
   test(`reports ${name} without claiming enforcement`, async () => {
     const mock = connection(reply)
-    const result = await applyWindowsAllowlist([], { platform: 'win32', connect: mock.connect, timeout: 10 })
+    const result = await applyWindowsAllowlist(migrateLegacy([]), { platform: 'win32', connect: mock.connect, timeout: 10 })
     assert.equal(result.applied, false)
     assert.equal(mock.socket.destroyed, true)
   })
 }
 
 test('preserves service rejection', async () => {
-  const mock = connection((socket) => socket.emit('data', '{"applied":false,"message":"WFP transaction failed"}\n'))
-  assert.deepEqual(await applyWindowsAllowlist([], { platform: 'win32', connect: mock.connect }), { applied: false, message: 'WFP transaction failed' })
+  const mock = connection((socket) => socket.emit('data', '{"version":2,"applied":false,"message":"WFP transaction failed"}\n'))
+  assert.deepEqual(await applyWindowsAllowlist(migrateLegacy([]), { platform: 'win32', connect: mock.connect }), { applied: false, message: 'WFP transaction failed' })
+})
+
+test('rejects incompatible responses without a legacy retry', async () => {
+  let requests = 0
+  const mock = connection((socket, request) => {
+    requests++
+    assert.equal(request.websites[0].allowSubdomains, true)
+    socket.emit('data', '{"version":1,"applied":true,"message":"Applied"}\n')
+  })
+  const result = await applyWindowsAllowlist({ version: 2, websites: [{ domain: 'example.com', allowSubdomains: true }] }, { platform: 'win32', connect: mock.connect })
+  assert.equal(result.applied, false)
+  assert.match(result.message, /upgrade required/i)
+  assert.equal(requests, 1)
 })

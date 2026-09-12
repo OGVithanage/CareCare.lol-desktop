@@ -20,6 +20,7 @@ jobs:
           dotnet-version: 8.0.x
       - run: ./windows/build.ps1
       - run: dotnet run --project windows/tests/CareCare.PolicyTests.csproj
+      - run: ./windows/tests/BrowserPolicy.Tests.ps1
       - uses: actions/upload-artifact@v4
         with:
           name: CareCare-Windows-service-x64

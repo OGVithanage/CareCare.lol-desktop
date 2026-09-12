@@ -5,6 +5,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <PlatformTarget>x64</PlatformTarget>
+    <Version>0.2.0</Version>
     <AssemblyName>CareCare.Service</AssemblyName>
   </PropertyGroup>
   <ItemGroup>

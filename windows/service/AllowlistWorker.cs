@@ -12,49 +12,15 @@ internal sealed class AllowlistWorker(ILogger<AllowlistWorker> logger) : Backgro
     private static readonly string Root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "CareCare");
     private static readonly string StatePath = Path.Combine(Root, "allowlist.json");
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
-    private readonly SemaphoreSlim gate = new(1, 1);
-    private readonly Dictionary<string, Resolution> cache = new(StringComparer.Ordinal);
-    private string[] domains = [];
-    private string resolverSignature = "";
-    private bool policyDirty;
+    private readonly FilteringProxy proxy = new();
 
     private static string Resolvers() => string.Join('\n', NetworkInterface.GetAllNetworkInterfaces()
         .Where(adapter => adapter.OperationalStatus == OperationalStatus.Up)
         .SelectMany(adapter => adapter.GetIPProperties().DnsAddresses)
-        // WFP address matches do not include IPv6 scope identifiers.
         .Select(address => address.ToString().Split('%')[0]).Distinct().Order());
 
-    private void Apply()
-    {
-        policyDirty = true;
-        var resolvers = Resolvers();
-        var addresses = domains.Where(cache.ContainsKey).SelectMany(domain => cache[domain].Addresses).Distinct();
-        Native.Check(Native.ApplyPolicy(string.Join('\n', addresses), resolvers));
-        resolverSignature = resolvers;
-        policyDirty = false;
-    }
-
-    private async Task Refresh(CancellationToken token)
-    {
-        var now = DateTimeOffset.UtcNow;
-        foreach (var domain in cache.Keys.Where(domain => !domains.Contains(domain) || cache[domain].Expires <= now).ToArray())
-            cache.Remove(domain);
-        // Revoke removed/expired addresses before performing possibly slow DNS lookups.
-        Apply();
-        var missing = domains.Where(domain => !cache.ContainsKey(domain)).ToArray();
-        var results = new System.Collections.Concurrent.ConcurrentDictionary<string, Resolution>();
-        await Parallel.ForEachAsync(missing, new ParallelOptions { MaxDegreeOfParallelism = 8, CancellationToken = token },
-            (domain, _) =>
-            {
-                try { results[domain] = Native.Resolve(domain); }
-                catch (Exception error) { logger.LogWarning(error, "DNS lookup failed for {Domain}; it remains blocked", domain); }
-                return ValueTask.CompletedTask;
-            });
-        foreach (var (domain, result) in results) cache[domain] = result;
-        // A lookup batch can outlive a short TTL. Never install already-expired results.
-        foreach (var domain in cache.Keys.Where(domain => cache[domain].Expires <= DateTimeOffset.UtcNow).ToArray()) cache.Remove(domain);
-        Apply();
-    }
+    private static void ApplyBoundary() => Native.Check(Native.ApplyPolicy(
+        Environment.ProcessPath ?? throw new InvalidOperationException("Missing executable path."), Resolvers()));
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -71,9 +37,9 @@ internal sealed class AllowlistWorker(ILogger<AllowlistWorker> logger) : Backgro
     {
         // Install deny policy before reading state or resolving any domain. Persistent
         // rules survive service crashes/stops. Startup never trusts stale saved IPs.
-        Apply();
-        if (File.Exists(StatePath))
-            domains = DomainPolicy.Expand(DomainPolicy.Normalize(JsonSerializer.Deserialize<string[]>(await File.ReadAllTextAsync(StatePath, stoppingToken), Json)));
+        ApplyBoundary();
+        var policy = await PolicyState.Load(StatePath, stoppingToken);
+        proxy.Publish(policy);
         var config = JsonSerializer.Deserialize<ServiceConfig>(await File.ReadAllTextAsync(Path.Combine(Root, "service.json"), stoppingToken), Json)
             ?? throw new InvalidDataException("Missing service configuration.");
         var security = new PipeSecurity();
@@ -84,12 +50,25 @@ internal sealed class AllowlistWorker(ILogger<AllowlistWorker> logger) : Backgro
         security.AddAccessRule(new PipeAccessRule(new SecurityIdentifier(config.ControllerSid), PipeAccessRights.ReadWrite, AccessControlType.Allow));
 
         // Keep the first instance alive for the service lifetime to prevent pipe-name squatting.
-        using var pipe = NamedPipeServerStreamAcl.Create("CareCare.Allowlist.v1", PipeDirection.InOut, 1,
+        using var pipe = NamedPipeServerStreamAcl.Create("CareCare.Allowlist.v2", PipeDirection.InOut, 1,
             PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.FirstPipeInstance,
             65536, 65536, security);
-        await Refresh(stoppingToken);
-        using var refreshStop = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-        var refreshTask = RefreshLoop(refreshStop.Token);
+        proxy.Start();
+        using var runtimeStop = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        var proxyTask = proxy.Run(runtimeStop.Token);
+        var boundaryTask = BoundaryLoop(runtimeStop.Token);
+        var pipeTask = Serve(pipe, runtimeStop.Token);
+        var completed = await Task.WhenAny(proxyTask, boundaryTask, pipeTask);
+        runtimeStop.Cancel();
+        proxy.Dispose();
+        // A failed listener or boundary refresh terminates the process for SCM recovery.
+        await completed;
+        stoppingToken.ThrowIfCancellationRequested();
+        throw new IOException("An enforcement component stopped unexpectedly.");
+    }
+
+    private async Task Serve(NamedPipeServerStream pipe, CancellationToken stoppingToken)
+    {
         try
         {
             while (!stoppingToken.IsCancellationRequested)
@@ -99,27 +78,16 @@ internal sealed class AllowlistWorker(ILogger<AllowlistWorker> logger) : Backgro
                 {
                     using var deadline = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
                     deadline.CancelAfter(TimeSpan.FromSeconds(150));
-                    var request = JsonSerializer.Deserialize<Request>(await ReadRequest(pipe, deadline.Token), Json);
-                    if (request?.Version != 1) throw new ArgumentException("Unsupported protocol version.");
-                    var updated = DomainPolicy.Normalize(request.Websites);
-                    await gate.WaitAsync(deadline.Token);
-                    try
+                    // v1 requests are deliberately rejected; no lossy downgrade.
+                    var updated = DomainPolicy.Parse(await ReadRequest(pipe, deadline.Token));
+                    await PolicyState.Save(StatePath, updated, deadline.Token);
+                    try { proxy.Publish(updated); }
+                    catch
                     {
-                        // Save desired domains atomically for boot recovery, then apply them.
-                        var temporary = StatePath + ".tmp";
-                        await using (var stream = new FileStream(temporary, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
-                        {
-                            await JsonSerializer.SerializeAsync(stream, updated, Json, deadline.Token);
-                            stream.Flush(true);
-                        }
-                        File.Move(temporary, StatePath, true);
-                        domains = DomainPolicy.Expand(updated);
-                        await Refresh(deadline.Token);
-                        var unresolved = domains.Where(domain => !cache.ContainsKey(domain)).ToArray();
-                        await Reply(pipe, true, unresolved.Length == 0 ? "Saved and applied by Windows service." :
-                            $"Windows policy applied. {unresolved.Length} unresolved domain(s) remain blocked: {string.Join(", ", unresolved.Take(5))}", deadline.Token);
+                        proxy.Publish(new Allowlist(2, []));
+                        throw;
                     }
-                    finally { gate.Release(); }
+                    await Reply(pipe, true, "Saved and applied by Windows service (browser proxy).", deadline.Token);
                 }
                 catch (Exception error) when (!stoppingToken.IsCancellationRequested)
                 {
@@ -134,38 +102,19 @@ internal sealed class AllowlistWorker(ILogger<AllowlistWorker> logger) : Backgro
                 finally { pipe.Disconnect(); }
             }
         }
-        finally
-        {
-            refreshStop.Cancel();
-            try { await refreshTask; }
-            catch (OperationCanceledException) when (refreshStop.IsCancellationRequested) { }
-        }
+        finally { proxy.Dispose(); }
     }
 
-    private async Task RefreshLoop(CancellationToken token)
+    private static async Task BoundaryLoop(CancellationToken token)
     {
+        var signature = Resolvers();
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
-        var nextRetry = DateTimeOffset.MinValue;
         while (await timer.WaitForNextTickAsync(token))
         {
-            await gate.WaitAsync(token);
-            try
-            {
-                var now = DateTimeOffset.UtcNow;
-                if (policyDirty || Resolvers() != resolverSignature || cache.Values.Any(result => result.Expires <= now) ||
-                    (domains.Any(domain => !cache.ContainsKey(domain)) && now >= nextRetry))
-                {
-                    await Refresh(token);
-                    nextRetry = DateTimeOffset.UtcNow.AddSeconds(30);
-                }
-            }
-            catch (Exception error) when (!token.IsCancellationRequested)
-            {
-                logger.LogCritical(error, "Could not refresh WFP policy; retained policy may be stale");
-                // Let SCM recovery restart and install the fail-closed baseline.
-                Environment.Exit(1);
-            }
-            finally { gate.Release(); }
+            var current = Resolvers();
+            if (current == signature) continue;
+            ApplyBoundary();
+            signature = current;
         }
     }
 
@@ -186,11 +135,10 @@ internal sealed class AllowlistWorker(ILogger<AllowlistWorker> logger) : Backgro
 
     private static async Task Reply(Stream stream, bool applied, string message, CancellationToken token)
     {
-        var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { applied, message }, Json) + "\n");
+        var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { version = 2, applied, message }, Json) + "\n");
         await stream.WriteAsync(bytes, token);
         await stream.FlushAsync(token);
     }
 
-    private sealed record Request(int Version, string[] Websites);
     private sealed record ServiceConfig(string ControllerSid);
 }

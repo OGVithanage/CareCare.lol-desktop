@@ -3,8 +3,6 @@
 #include <windows.h>
 #include <initguid.h>
 #include <fwpmu.h>
-#include <windns.h>
-#include <algorithm>
 #include <string>
 #include <sstream>
 #include <vector>
@@ -94,7 +92,28 @@ static void Add(HANDLE engine, bool ipv6, bool permit, std::vector<FWPM_FILTER_C
     filter.filterCondition = conditions.data();
     Check(FwpmFilterAdd0(engine, &filter, nullptr, nullptr));
 }
-static void Address(HANDLE engine, const std::wstring& address, bool dns) {
+struct AppId {
+    FWP_BYTE_BLOB* value = nullptr;
+    explicit AppId(const wchar_t* path) { Check(FwpmGetAppIdFromFileName0(path, &value)); }
+    ~AppId() { if (value) FwpmFreeMemory0(reinterpret_cast<void**>(&value)); }
+    FWPM_FILTER_CONDITION0 Condition() const {
+        FWPM_FILTER_CONDITION0 condition{};
+        condition.fieldKey = FWPM_CONDITION_ALE_APP_ID;
+        condition.matchType = FWP_MATCH_EQUAL;
+        condition.conditionValue.type = FWP_BYTE_BLOB_TYPE;
+        condition.conditionValue.byteBlob = value;
+        return condition;
+    }
+};
+static FWPM_FILTER_CONDITION0 Transport(UINT8 protocol) {
+    FWPM_FILTER_CONDITION0 condition{};
+    condition.fieldKey = FWPM_CONDITION_IP_PROTOCOL;
+    condition.matchType = FWP_MATCH_EQUAL;
+    condition.conditionValue.type = FWP_UINT8;
+    condition.conditionValue.uint8 = protocol;
+    return condition;
+}
+static void DnsAddress(HANDLE engine, const std::wstring& address, const AppId& proxy, const AppId& system) {
     IN_ADDR v4{};
     IN6_ADDR v6{};
     FWP_BYTE_ARRAY16 bytes{};
@@ -111,48 +130,40 @@ static void Address(HANDLE engine, const std::wstring& address, bool dns) {
         condition.conditionValue.type = FWP_BYTE_ARRAY16_TYPE;
         condition.conditionValue.byteArray16 = &bytes;
     } else { throw static_cast<DWORD>(ERROR_INVALID_PARAMETER); }
-    if (!dns) { Add(engine, ipv6, true, {condition}); return; }
-    for (UINT8 protocol : {static_cast<UINT8>(IPPROTO_UDP), static_cast<UINT8>(IPPROTO_TCP)}) {
-        FWPM_FILTER_CONDITION0 transport{};
-        transport.fieldKey = FWPM_CONDITION_IP_PROTOCOL;
-        transport.matchType = FWP_MATCH_EQUAL;
-        transport.conditionValue.type = FWP_UINT8;
-        transport.conditionValue.uint8 = protocol;
-        Add(engine, ipv6, true, {condition, Port(FWPM_CONDITION_IP_REMOTE_PORT, 53), transport});
-    }
+    for (UINT8 protocol : {static_cast<UINT8>(IPPROTO_UDP), static_cast<UINT8>(IPPROTO_TCP)})
+        for (auto app : {proxy.Condition(), system.Condition()})
+            Add(engine, ipv6, true, {condition, Port(FWPM_CONDITION_IP_REMOTE_PORT, 53), Transport(protocol), app});
 }
-static void Infrastructure(HANDLE engine, bool ipv6) {
+static void Infrastructure(HANDLE engine, bool ipv6, const AppId& system) {
     FWPM_FILTER_CONDITION0 loopback{};
     loopback.fieldKey = FWPM_CONDITION_FLAGS;
     loopback.matchType = FWP_MATCH_FLAGS_ALL_SET;
     loopback.conditionValue.type = FWP_UINT32;
     loopback.conditionValue.uint32 = FWP_CONDITION_FLAG_IS_LOOPBACK;
-    Add(engine, ipv6, true, {loopback});
-    FWPM_FILTER_CONDITION0 udp{};
-    udp.fieldKey = FWPM_CONDITION_IP_PROTOCOL;
-    udp.matchType = FWP_MATCH_EQUAL;
-    udp.conditionValue.type = FWP_UINT8;
-    udp.conditionValue.uint8 = IPPROTO_UDP;
-    Add(engine, ipv6, true, {udp, Port(FWPM_CONDITION_IP_LOCAL_PORT, ipv6 ? 546 : 68),
-        Port(FWPM_CONDITION_IP_REMOTE_PORT, ipv6 ? 547 : 67)});
+    Add(engine, ipv6, true, {loopback, Transport(IPPROTO_TCP), Port(FWPM_CONDITION_IP_REMOTE_PORT, 17843)});
+    Add(engine, ipv6, true, {system.Condition(), Transport(IPPROTO_UDP),
+        Port(FWPM_CONDITION_IP_LOCAL_PORT, ipv6 ? 546 : 68), Port(FWPM_CONDITION_IP_REMOTE_PORT, ipv6 ? 547 : 67)});
 }
-extern "C" __declspec(dllexport) DWORD __cdecl ApplyPolicy(const wchar_t* addresses, const wchar_t* resolvers) noexcept {
+extern "C" __declspec(dllexport) DWORD __cdecl ApplyPolicy(const wchar_t* proxyExecutable, const wchar_t* resolvers) noexcept {
     try {
-        if (!addresses || !resolvers) return ERROR_INVALID_PARAMETER;
+        if (!proxyExecutable || !*proxyExecutable || !resolvers) return ERROR_INVALID_PARAMETER;
+        AppId proxy(proxyExecutable);
+        wchar_t directory[MAX_PATH]{};
+        if (!GetSystemDirectoryW(directory, MAX_PATH)) return GetLastError();
+        AppId system((std::wstring(directory) + L"\\svchost.exe").c_str());
         Engine engine;
         Transaction transaction(engine.handle);
         EnsureObjects(engine.handle);
         DeleteFilters(engine.handle);
         for (bool ipv6 : {false, true}) {
             Add(engine.handle, ipv6, false, {});
-            Infrastructure(engine.handle, ipv6);
+            Infrastructure(engine.handle, ipv6, system);
+            for (UINT16 port : {static_cast<UINT16>(80), static_cast<UINT16>(443)})
+                Add(engine.handle, ipv6, true, {proxy.Condition(), Transport(IPPROTO_TCP), Port(FWPM_CONDITION_IP_REMOTE_PORT, port)});
         }
         std::wstring entry;
         std::wistringstream dns(resolvers);
-        while (std::getline(dns, entry)) if (!entry.empty()) Address(engine.handle, entry, true);
-        std::wistringstream allowed(addresses);
-        while (std::getline(allowed, entry)) if (!entry.empty()) Address(engine.handle, entry, false);
-        // Addition/removal at ALE triggers existing flows to reauthorize on their next packet.
+        while (std::getline(dns, entry)) if (!entry.empty()) DnsAddress(engine.handle, entry, proxy, system);
         transaction.Commit();
         return ERROR_SUCCESS;
     } catch (DWORD error) { return error; } catch (...) { return ERROR_GEN_FAILURE; }
@@ -169,38 +180,4 @@ extern "C" __declspec(dllexport) DWORD __cdecl RemovePolicy() noexcept {
         transaction.Commit();
         return ERROR_SUCCESS;
     } catch (DWORD error) { return error; } catch (...) { return ERROR_GEN_FAILURE; }
-}
-// The system resolver is used, with TTLs from both address and CNAME records.
-extern "C" __declspec(dllexport) DWORD __cdecl ResolveDomain(const wchar_t* domain, wchar_t* output, DWORD capacity, DWORD* ttl) noexcept {
-    try {
-        if (!domain || !output || !ttl || capacity == 0) return ERROR_INVALID_PARAMETER;
-        std::wstring addresses;
-        *ttl = MAXDWORD;
-        for (WORD type : {static_cast<WORD>(DNS_TYPE_A), static_cast<WORD>(DNS_TYPE_AAAA)}) {
-            PDNS_RECORD records = nullptr;
-            const auto result = DnsQuery_W(domain, type, DNS_QUERY_BYPASS_CACHE | DNS_QUERY_TREAT_AS_FQDN,
-                nullptr, &records, nullptr);
-            if (result != ERROR_SUCCESS && result != DNS_INFO_NO_RECORDS && result != DNS_ERROR_RCODE_NAME_ERROR) {
-                if (records) DnsRecordListFree(records, DnsFreeRecordList);
-                return result;
-            }
-            for (auto record = records; record; record = record->pNext) {
-                if (record->Flags.S.Section != DnsSectionAnswer) continue;
-                if (record->wType == DNS_TYPE_CNAME || record->wType == DNS_TYPE_A || record->wType == DNS_TYPE_AAAA)
-                    *ttl = std::min(*ttl, record->dwTtl);
-                wchar_t address[INET6_ADDRSTRLEN]{};
-                if (record->wType == DNS_TYPE_A)
-                    InetNtopW(AF_INET, &record->Data.A.IpAddress, address, INET6_ADDRSTRLEN);
-                else if (record->wType == DNS_TYPE_AAAA)
-                    InetNtopW(AF_INET6, &record->Data.AAAA.Ip6Address, address, INET6_ADDRSTRLEN);
-                if (address[0]) { addresses += address; addresses += L'\n'; }
-            }
-            if (records) DnsRecordListFree(records, DnsFreeRecordList);
-        }
-        if (addresses.empty()) return DNS_INFO_NO_RECORDS;
-        if (addresses.size() >= capacity) return ERROR_INSUFFICIENT_BUFFER;
-        std::copy(addresses.begin(), addresses.end(), output);
-        output[addresses.size()] = 0;
-        return ERROR_SUCCESS;
-    } catch (...) { return ERROR_GEN_FAILURE; }
 }

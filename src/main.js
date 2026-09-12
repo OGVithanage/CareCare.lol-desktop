@@ -3,13 +3,25 @@ import Store from 'electron-store'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { applyWindowsAllowlist } from './windows-service.js'
-import { normalizeWebsite } from './website.js'
+import { loadAllowlist, normalizeAllowlist, fromLegacyEditor } from './allowlist.js'
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url))
 let mainWindow
 
 const store = new Store({
   schema: {
+    allowlist: {
+      type: 'object',
+      required: ['version', 'websites'],
+      additionalProperties: false,
+      properties: {
+        version: { type: 'integer', const: 2 },
+        websites: { type: 'array', maxItems: 500, items: {
+          type: 'object', required: ['domain', 'allowSubdomains'], additionalProperties: false,
+          properties: { domain: { type: 'string', maxLength: 253 }, allowSubdomains: { type: 'boolean' } }
+        } }
+      }
+    },
     allowedWebsites: {
       type: 'array',
       uniqueItems: true,
@@ -52,10 +64,17 @@ const createWindow = () => {
 }
 
 let saveQueue = Promise.resolve()
-const saveAndApply = (websites) => {
+const saveAndApply = (input) => {
   const operation = saveQueue.then(async () => {
-    store.set('allowedWebsites', websites)
-    return { websites, enforcement: await applyWindowsAllowlist(websites) }
+    const current = loadAllowlist(store)
+    const allowlist = input === undefined ? current : Array.isArray(input)
+      ? fromLegacyEditor(input, current) : normalizeAllowlist(input)
+    store.set('allowlist', allowlist)
+    return {
+      websites: allowlist.websites.map(rule => `https://${rule.domain}`),
+      allowlist,
+      enforcement: await applyWindowsAllowlist(allowlist)
+    }
   })
   saveQueue = operation.catch(() => {})
   return operation
@@ -66,15 +85,12 @@ app.whenReady().then(() => {
 
   ipcMain.handle('allowlist:get', (event) => {
     if (!validateSender(event)) throw new Error('Unauthorized IPC sender')
-    return saveAndApply([...new Set(store.get('allowedWebsites').map(normalizeWebsite))])
+    return saveAndApply()
   })
 
   ipcMain.handle('allowlist:save', (event, websites) => {
     if (!validateSender(event)) throw new Error('Unauthorized IPC sender')
-    if (!Array.isArray(websites) || websites.length > 500) throw new Error('Invalid website list')
-
-    const normalizedWebsites = [...new Set(websites.map(normalizeWebsite))]
-    return saveAndApply(normalizedWebsites)
+    return saveAndApply(websites)
   })
 
   createWindow()
